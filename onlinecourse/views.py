@@ -1,7 +1,6 @@
 from django.shortcuts import render
 from django.http import HttpResponseRedirect
-# <HINT> Import any new Models here
-from .models import Course, Enrollment
+from .models import Course, Enrollment, Question, Choice, Submission
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404, render, redirect
 from django.urls import reverse
@@ -11,7 +10,15 @@ import logging
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
 # Create your views here.
-
+def submit(request, course_id):
+    course = get_object_or_404(Course, pk=course_id)
+    user = request.user
+    enrollment = Enrollment.objects.get(user=user, course=course)
+    submission = Submission.objects.create(enrollment=enrollment)
+    choices = extract_answers(request)
+    submission.choices.set(choices)
+    submission_id = submission.id
+    return HttpResponseRedirect(reverse(viewname='onlinecourse:exam_result', args=(course_id, submission_id,)))
 
 def registration_request(request):
     context = {}
@@ -124,13 +131,37 @@ def extract_answers(request):
    return submitted_anwsers
 
 
-# <HINT> Create an exam result view to check if learner passed exam and show their question results and result for each question,
-# you may implement it based on the following logic:
-        # Get course and submission based on their ids
-        # Get the selected choice ids from the submission record
-        # For each selected choice, check if it is a correct answer or not
-        # Calculate the total score
-#def show_exam_result(request, course_id, submission_id):
+def show_exam_result(request, course_id, submission_id):
+    course = get_object_or_404(Course, pk=course_id)
+    submission = get_object_or_404(Submission, pk=submission_id)
+    selected_choice_ids = [choice.id for choice in submission.choices.all()]  # Get choice IDs
+    results = []
+    total_correct = 0
+
+    for question in course.questions.all():
+        correct_choice_ids = [choice.id for choice in question.choices.filter(is_correct=True)]
+        selected_for_question = [choice_id for choice_id in selected_choice_ids if choice_id in [choice.id for choice in question.choices.all()]]
+
+        is_correct = all(choice_id in correct_choice_ids for choice_id in selected_for_question) and len(selected_for_question) == len(correct_choice_ids)
+
+        if is_correct:
+            total_correct += 1
+
+        results.append({
+            'question': question,
+            'selected_choices': [choice for choice in question.choices.all() if choice.id in selected_for_question],
+            'is_correct': is_correct,
+            'correct_choices': question.choices.filter(is_correct=True),
+        })
+
+    context = {
+        'course': course,
+        'submission': submission,
+        'results': results,
+        'total_score': total_correct,
+        'total_questions': course.questions.count(),
+    }
+    return render(request, 'onlinecourse/exam_result.html', context)
 
 
 
